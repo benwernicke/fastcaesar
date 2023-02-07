@@ -40,11 +40,12 @@ static uint8_t offset_from_key(int32_t key)
 
 static void flip_16(uint8_t* cptr, uint8_t o)
 {
-    __m128i orig = _mm_load_si128((__m128i*)cptr);
+    __m128i c = _mm_load_si128((__m128i*)cptr);
 
-    // ascii prefix
-    __m128i prefix = _mm_and_si128(orig, _mm_set1_epi8((uint8_t)0xE0));
-    __m128i c = _mm_and_si128(orig, _mm_set1_epi8((uint8_t)0x1F));
+    // seperate char prefix and identifier
+    __m128i prefix = _mm_and_si128(c, _mm_set1_epi8((uint8_t)0xE0));
+    c = _mm_and_si128(c, _mm_set1_epi8((uint8_t)0x1F));
+
     __m128i alpha_mask = _mm_cmplt_epi8(c, _mm_set1_epi8(27));
     {
         __m128i lower = _mm_cmpeq_epi8(prefix, _mm_set1_epi8(0x60));
