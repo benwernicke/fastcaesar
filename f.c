@@ -83,7 +83,7 @@ static void* work(void* a)
         pthread_mutex_unlock(&mutex);
 
         uint32_t i = 0;
-        for (; f->buf_len -i >= 16; i += 16) {
+        for (; f->buf_len - i >= 16; i += 16) {
             flip_16((uint8_t*)f->buf + i);
         }
         for (; i < f->buf_len; ++i) {

@@ -10,17 +10,69 @@
 
 #define NUM_THREADS 4
 
-typedef struct future_t future_t;
-struct future_t {
-    char* buf;
-    future_t* next;
+typedef struct chunk_t chunk_t;
+struct chunk_t {
+    char buf[BUF_SIZE + 1];
     uint32_t buf_len;
+    uint32_t id;
+    chunk_t* next;
 };
 
 static pthread_t tid[NUM_THREADS] = { 0 };
-static future_t* queue = NULL;
-static bool running = 1;
 static uint8_t offset = 0;
+static FILE* file = NULL;
+
+static chunk_t* reader(void)
+{
+    static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+    static uint32_t chunk_id = 0;
+
+    pthread_mutex_lock(&mutex);
+
+    if (feof(file)) {
+        pthread_mutex_unlock(&mutex);
+        return NULL;
+    }
+
+    chunk_t* chunk = malloc(sizeof(*chunk));
+    chunk->buf_len = fread(chunk->buf, 1, BUF_SIZE, file);
+    chunk->id = chunk_id++;
+
+    pthread_mutex_unlock(&mutex);
+    return chunk;
+}
+
+static void writer(chunk_t* chunk)
+{
+    static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+    static uint32_t chunk_id = 0;
+    static chunk_t* list = NULL;
+
+    pthread_mutex_lock(&mutex);
+
+    if (chunk->id == chunk_id) {
+        fputs(chunk->buf, stdout);
+        free(chunk);
+        chunk_id++;
+
+        while (list && list->id == chunk_id) {
+            fputs(list->buf, stdout);
+            chunk_t* tmp = list;
+            list = list->next;
+            free(tmp);
+            chunk_id++;
+        }
+    } else {
+        chunk_t** curr = &list;
+        while (*curr && (*curr)->id < chunk->id) {
+            curr = &(*curr)->next;
+        }
+        chunk->next = *curr;
+        *curr = chunk;
+    }
+
+    pthread_mutex_unlock(&mutex);
+}
 
 static void flip_16(uint8_t* cptr)
 {
@@ -58,27 +110,6 @@ static void flip_16(uint8_t* cptr)
     _mm_maskmoveu_si128(c, alpha_mask, (char*)cptr);
 }
 
-static inline future_t* lf_pop(void)
-{
-    future_t* new;
-    future_t* old = atomic_load(&queue);
-    do {
-        if (!old) {
-            return NULL;
-        }
-        new = old->next;
-    } while (!atomic_compare_exchange_weak(&queue, &old, new));
-    return old;
-}
-
-static inline void lf_push(future_t* new)
-{
-    future_t* old = atomic_load(&queue);
-    do {
-        new->next = old;
-    } while (!atomic_compare_exchange_weak(&queue, &old, new));
-}
-
 static inline uint8_t flip(uint8_t c)
 {
     if (!isalpha(c)) return c;
@@ -87,24 +118,25 @@ static inline uint8_t flip(uint8_t c)
 
 static void* work(void* a)
 {
-    future_t* f = NULL;
+    chunk_t* chunk = NULL;
     while (1) {
-        do {
-            f = lf_pop();
-        } while (!f && running);
+        chunk = reader();
 
-        if (!f && !running) {
+        if (!chunk) {
             return NULL;
         }
 
         uint32_t i = 0;
-        for (; f->buf_len -i >= 16; i += 16) {
-            flip_16((uint8_t*)f->buf + i);
+        for (; chunk->buf_len - i >= 16; i += 16) {
+            flip_16((uint8_t*)chunk->buf + i);
         }
-        for (; i < f->buf_len; ++i) {
-            f->buf[i] = flip(f->buf[i]);
+        for (; i < chunk->buf_len; ++i) {
+            chunk->buf[i] = flip(chunk->buf[i]);
         }
-        free(f);
+
+        chunk->buf[chunk->buf_len] = 0;
+
+        writer(chunk);
     }
 }
 
@@ -118,45 +150,13 @@ static uint8_t offset_from_key(int32_t key)
 void caesar(FILE* fp, int32_t key)
 {
     offset = offset_from_key(key);
-    running = 1;
+    file = fp;
 
     for (uint32_t i = 0; i < NUM_THREADS; ++i) {
         pthread_create(&tid[i], NULL, work, NULL);
     }
 
-    char* file_content = NULL;
-    uint64_t file_len = 0;
-    {
-        fseek(fp, 0, SEEK_END);
-        file_len = ftell(fp);
-        rewind(fp);
-        file_content = malloc(file_len + 1);
-        file_content[file_len] = 0;
-        fread(file_content, 1, file_len, fp);
-    }
-
-    uint64_t i = 0;
-    for (;  i + BUF_SIZE < file_len; i += BUF_SIZE) {
-        future_t* f = malloc(sizeof(*f));
-        f->buf = file_content + i;
-        f->buf_len = BUF_SIZE;
-        f->next = NULL;
-        lf_push(f);
-    }
-
-    if (i < file_len) {
-        future_t* f = malloc(sizeof(*f));
-        f->buf = file_content + i;
-        f->buf_len = file_len - i;
-        f->next = NULL;
-        lf_push(f);
-    }
-
-    running = 0;
-
     for (uint32_t i = 0; i < NUM_THREADS; ++i) {
         pthread_join(tid[i], NULL);
     }
-    fputs(file_content, stdout);
-    free(file_content);
 }
