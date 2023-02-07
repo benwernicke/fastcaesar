@@ -156,6 +156,30 @@ void caesar(FILE* fp, int32_t key)
         pthread_create(&tid[i], NULL, work, NULL);
     }
 
+    // main thread can work too
+    /*{*/
+        /*chunk_t* chunk = NULL;*/
+        /*while (1) {*/
+            /*chunk = reader();*/
+
+            /*if (!chunk) {*/
+                /*break;*/
+            /*}*/
+
+            /*uint32_t i = 0;*/
+            /*for (; chunk->buf_len - i >= 16; i += 16) {*/
+                /*flip_16((uint8_t*)chunk->buf + i);*/
+            /*}*/
+            /*for (; i < chunk->buf_len; ++i) {*/
+                /*chunk->buf[i] = flip(chunk->buf[i]);*/
+            /*}*/
+
+            /*chunk->buf[chunk->buf_len] = 0;*/
+
+            /*writer(chunk);*/
+        /*}*/
+    /*}*/
+
     for (uint32_t i = 0; i < NUM_THREADS; ++i) {
         pthread_join(tid[i], NULL);
     }

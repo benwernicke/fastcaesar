@@ -1,6 +1,6 @@
 CC := gcc
-DEBUG_FLAGS    := -Wall -pedantic -g -fsanitize=leak -fsanitize=undefined -fsanitize=address -msse4.2 -lpthread -DBUF_SIZE=8192
-RELEASE_FLAGS  := -march=native -mtune=native -O3 -flto -msse4.2 -lpthread -DBUF_SIZE=8192
+DEBUG_FLAGS    := -Wall -pedantic -g -fsanitize=leak -fsanitize=undefined -fsanitize=address -lpthread -DBUF_SIZE=8192 -msse4.2
+RELEASE_FLAGS  := -march=native -mtune=native -O3 -flto -lpthread -DBUF_SIZE=8192 -msse4.2
 
 a.out := main.o a.o
 b.out := main.o b.o
@@ -26,7 +26,7 @@ bench: release
 		'./h.out lorem 22' './i.out lorem 22'
 
 clean:
-	rm *.out *.o
+	rm -f *.out *.o *.log
 
 debug: CFLAGS := ${DEBUG_FLAGS}
 debug: ${TARGETS}
