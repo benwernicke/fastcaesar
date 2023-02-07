@@ -4,10 +4,10 @@
 #include <stdbool.h>
 #include <immintrin.h>
 
-static char buf[1025] = { 0 };
+static char buf[BUF_SIZE] = { 0 };
 static uint32_t buf_len = 0;
 
-static bool get_buf(FILE* f) { return (buf_len = fread(buf, 1, 1024, f)) > 0; }
+static bool get_buf(FILE* f) { return (buf_len = fread(buf, 1, sizeof(buf) - 1, f)) > 0; }
 
 static uint8_t offset_from_key(int32_t key)
 {
