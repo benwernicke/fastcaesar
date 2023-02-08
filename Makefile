@@ -13,19 +13,28 @@ g.out := main.o g.o
 h.out := main.o h.o
 i.out := main.o i.o
 j.out := main.o j.o
+k.out := main.o k.o
 
 SRC := $(wildcard *.c)
 OBJ := ${SRC:c=o}
-TARGETS := a.out b.out c.out d.out e.out f.out g.out h.out i.out j.out
+TARGETS := a.out b.out c.out d.out e.out f.out g.out h.out i.out j.out k.out
 
-.PHONY: clean all release debug bench
+.PHONY: clean all release debug bench bench2
 
 all: debug
 
 bench: release
-	hyperfine --warmup 10 -N './a.out lorem 22' './b.out lorem 22' './c.out lorem 22' \
-		'./d.out lorem 22' './e.out lorem 22' './f.out lorem 22' './g.out lorem 22' \
-		'./h.out lorem 22' './i.out lorem 22' './j.out lorem 22'
+	hyperfine --warmup 10 -N \
+		'./a.out lorem 22' \
+		'./b.out lorem 22' \
+		'./c.out lorem 22' \
+		'./d.out lorem 22' \
+		'./e.out lorem 22' \
+		'./f.out lorem 22' \
+		'./g.out lorem 22' \
+		'./h.out lorem 22' \
+		'./i.out lorem 22' \
+		'./j.out lorem 22'
 
 bench2: release
 	hyperfine --warmup 10 -N \

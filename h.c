@@ -68,6 +68,8 @@ static void flip_16(uint8_t* cptr)
 
     __m128i alpha_mask = _mm_cmplt_epi8(c, _mm_set1_epi8(27));
     {
+        __m128i z = _mm_cmpgt_epi8(c, _mm_set1_epi8(0));
+        alpha_mask = _mm_and_si128(alpha_mask, z);
         __m128i lower = _mm_cmpeq_epi8(prefix, _mm_set1_epi8(0x60));
         __m128i upper = _mm_cmpeq_epi8(prefix, _mm_set1_epi8(0x40));
         __m128i t = _mm_or_si128(lower, upper);
