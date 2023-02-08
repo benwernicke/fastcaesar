@@ -4,6 +4,10 @@
 #include <stdbool.h>
 #include <immintrin.h>
 
+// fancy gcc branch prediction stuff
+#define likely(x)       __builtin_expect((x),1)
+#define unlikely(x)     __builtin_expect((x),0)
+
 static _Alignas(32) char buf[BUF_SIZE + 1] = { 0 };
 static uint32_t buf_len = 0;
 
@@ -98,7 +102,7 @@ void caesar(FILE* fp, int32_t key)
         for (; buf_len -i >= 32; i += 32) {
             flip_32((uint8_t*)buf + i, o);
         }
-        if (buf_len - i >= 16) {
+        if (unlikely(buf_len - i >= 16)) {
             flip_16((uint8_t*)buf + i, o);
             i += 16;
         }

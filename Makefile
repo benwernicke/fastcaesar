@@ -1,5 +1,5 @@
 CC := gcc
-GENERAL_FLAGS := -DBUF_SIZE=1024 -mavx2 -lpthread
+GENERAL_FLAGS := -DBUF_SIZE=8192 -mavx2 -lpthread
 DEBUG_FLAGS    := ${GENERAL_FLAGS} -Wall -pedantic -g -fsanitize=leak -fsanitize=undefined -fsanitize=address
 RELEASE_FLAGS  := ${GENERAL_FLAGS} -march=native -mtune=native -O3 -flto
 
