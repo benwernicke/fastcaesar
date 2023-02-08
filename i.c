@@ -74,6 +74,42 @@ static void writer(chunk_t* chunk)
     pthread_mutex_unlock(&mutex);
 }
 
+static void flip_32(uint8_t* cptr)
+{
+    __m256i orig = _mm256_loadu_si256((__m256i*)cptr);
+    
+    __m256i prefix = _mm256_and_si256(orig, _mm256_set1_epi8((uint8_t)0xE0));
+    __m256i c      = _mm256_and_si256(orig, _mm256_set1_epi8((uint8_t)0x1F));
+
+    __m256i alpha_mask;
+    {
+        __m256i lower = _mm256_cmpeq_epi8(prefix, _mm256_set1_epi8(0x60));
+        __m256i upper = _mm256_cmpeq_epi8(prefix, _mm256_set1_epi8(0x40));
+        alpha_mask = _mm256_or_si256(lower, upper);
+
+        lower = _mm256_cmpgt_epi8(c, _mm256_set1_epi8(0));
+        upper = _mm256_cmpgt_epi8(c, _mm256_set1_epi8(26));
+        upper = _mm256_xor_si256(upper, _mm256_set1_epi8((uint8_t)0xFF));
+
+        upper = _mm256_and_si256(upper, lower);
+        alpha_mask = _mm256_and_si256(alpha_mask, upper);
+    }
+
+    {
+        __m256i not_alpha_mask = _mm256_xor_si256(alpha_mask, _mm256_set1_epi8((uint8_t)0xFF));
+        orig = _mm256_and_si256(orig, not_alpha_mask);
+    }
+
+    c = _mm256_add_epi8(c, _mm256_set1_epi8(offset));
+    __m256i m = _mm256_cmpgt_epi8(c, _mm256_set1_epi8(26));
+    m = _mm256_and_si256(m, _mm256_set1_epi8(26));
+    c = _mm256_sub_epi8(c, m);
+    c = _mm256_or_si256(c, prefix);
+    c = _mm256_and_si256(c, alpha_mask);
+    orig = _mm256_or_si256(c, orig);
+    _mm256_storeu_si256((__m256i*)cptr, orig);
+}
+
 static void flip_16(uint8_t* cptr)
 {
     __m128i c = _mm_load_si128((__m128i*)cptr);
@@ -127,8 +163,12 @@ static void* work(void* a)
         }
 
         uint32_t i = 0;
-        for (; chunk->buf_len - i >= 16; i += 16) {
+        for (; chunk->buf_len - i >= 32; i += 32) {
+            flip_32((uint8_t*)chunk->buf + i);
+        }
+        if (chunk->buf_len - i >= 16) {
             flip_16((uint8_t*)chunk->buf + i);
+            i += 16;
         }
         for (; i < chunk->buf_len; ++i) {
             chunk->buf[i] = flip(chunk->buf[i]);

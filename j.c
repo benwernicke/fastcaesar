@@ -5,23 +5,69 @@
 #include <stdbool.h>
 #include <stdbool.h>
 #include <stdlib.h>
+#include <stdatomic.h>
 #include <immintrin.h>
+
+// fancy gcc branch prediction stuff
+#define likely(x)       __builtin_expect((x),1)
+#define unlikely(x)     __builtin_expect((x),0)
 
 #define NUM_THREADS 4
 
-typedef struct future_t future_t;
-struct future_t {
+typedef struct chunk_t chunk_t;
+struct chunk_t {
     char buf[BUF_SIZE + 1];
-    future_t* next;
     uint32_t buf_len;
+    uint32_t id;
 };
 
 static pthread_t tid[NUM_THREADS] = { 0 };
-static future_t* queue = NULL;
-static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
-static bool running = 1;
 static uint8_t offset = 0;
+static FILE* file = NULL;
+
+static chunk_t* reader(void)
+{
+    static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+    static uint32_t chunk_id = 0;
+
+    pthread_mutex_lock(&mutex);
+
+    if (unlikely(feof(file))) {
+        pthread_mutex_unlock(&mutex);
+        return NULL;
+    }
+
+    chunk_t* chunk = malloc(sizeof(*chunk));
+    chunk->buf_len = fread(chunk->buf, 1, BUF_SIZE, file);
+    chunk->id = chunk_id++;
+
+    pthread_mutex_unlock(&mutex);
+    return chunk;
+}
+
+static void writer(chunk_t* chunk)
+{
+
+    // This seems to be the better technique compared to another mutex here:
+    // mutex in writer enforces some time offset between the workers, each task
+    // will take roughly the same time tho. So a mutex here would be unnecessary
+    // overhead. Very unlikely that multiple threads call this at the same time.
+    // atomic spinlock based on the chunk_ids is sufficient
+    //
+    // Even if chunk_id wraps back to zero, shouldnt be a problem. By the time
+    // it wraps. The original chunk with id zero must already be printed
+    
+    static uint32_t chunk_id = 0;
+    uint32_t id = 0;
+
+    do {
+        id = atomic_load(&chunk_id);
+    } while (id != chunk->id);
+
+    fputs(chunk->buf, stdout);
+    free(chunk);
+    atomic_fetch_add(&chunk_id, 1);
+}
 
 static void flip_32(uint8_t* cptr)
 {
@@ -77,14 +123,16 @@ static void flip_16(uint8_t* cptr)
 
     // caesar chiffre
     {
-        c = _mm_add_epi8(c, _mm_set1_epi8(offset));
+        // raw char values 0 <= c[x] <= 25 + o
+        c = _mm_add_epi8(c, _mm_set1_epi8(offset - 1));
 
         // basicly c[x] % 26
         {
-            __m128i m = _mm_cmpgt_epi8(c, _mm_set1_epi8(26));
+            __m128i m = _mm_cmpgt_epi8(c, _mm_set1_epi8(25));
             m = _mm_and_si128(_mm_set1_epi8(26), m);
             c = _mm_sub_epi8(c, m);
         }
+        c = _mm_add_epi8(c, _mm_set1_epi8(1));
 
         // add prefix back to c
         c = _mm_or_si128(c, prefix);
@@ -95,40 +143,39 @@ static void flip_16(uint8_t* cptr)
 
 static inline uint8_t flip(uint8_t c)
 {
-    if (!isalpha(c)) return c;
+    if (unlikely(!isalpha(c))) return c;
     return (((c & 0x1F) + offset - 1) % 26 + 1) | (c & 0xE0);
 }
 
 static void* work(void* a)
 {
-    future_t* f = NULL;
-    while (1) {
-        pthread_mutex_lock(&mutex);
-        while (!queue && running) {
-            pthread_cond_wait(&cond, &mutex);
-        }
-        if (queue) {
-            f = queue;
-            queue = f->next;
-        } else if (!running) {
-            pthread_mutex_unlock(&mutex);
+    chunk_t* chunk = NULL;
+    for (;;) {
+        chunk = reader();
+
+        if (unlikely(!chunk)) {
             return NULL;
         }
-        pthread_mutex_unlock(&mutex);
 
         uint32_t i = 0;
-        for (; f->buf_len - i >= 32; i += 32) {
-            flip_32((uint8_t*)f->buf + i);
+
+        for (; chunk->buf_len - i >= 32; i += 32) {
+            flip_32((uint8_t*)chunk->buf + i);
         }
-        if (f->buf_len - i >= 16) {
-            flip_16((uint8_t*)f->buf + i);
+        if (chunk->buf_len - i >= 16) {
+            flip_16((uint8_t*)chunk->buf + i);
             i += 16;
         }
-        for (; i < f->buf_len; ++i) {
-            f->buf[i] = flip(f->buf[i]);
+
+        for (; i < chunk->buf_len; ++i) {
+            chunk->buf[i] = flip(chunk->buf[i]);
         }
-        f->buf[i] = 0;
+
+        chunk->buf[chunk->buf_len] = 0;
+
+        writer(chunk);
     }
+    __builtin_unreachable();
 }
 
 static uint8_t offset_from_key(int32_t key)
@@ -141,44 +188,13 @@ static uint8_t offset_from_key(int32_t key)
 void caesar(FILE* fp, int32_t key)
 {
     offset = offset_from_key(key);
-    running = 1;
+    file = fp;
 
     for (uint32_t i = 0; i < NUM_THREADS; ++i) {
         pthread_create(&tid[i], NULL, work, NULL);
     }
 
-    uint32_t cap = 16;
-    uint32_t sz = 0;
-    future_t** fs = calloc(16, sizeof(*fs));
-
-    while (!feof(fp)) {
-        future_t* f = malloc(sizeof(*f));
-        f->buf_len = fread(f->buf, 1, sizeof(f->buf) - 1, fp);
-
-        pthread_mutex_lock(&mutex);
-        f->next = queue;
-        queue = f;
-        pthread_mutex_unlock(&mutex);
-        pthread_cond_signal(&cond);
-
-        if (sz >= cap) {
-            cap <<= 1;
-            fs = realloc(fs, cap * sizeof(*fs));
-        }
-        fs[sz++] = f;
-    }
-
-    running = 0;
-    pthread_cond_broadcast(&cond);
-
     for (uint32_t i = 0; i < NUM_THREADS; ++i) {
         pthread_join(tid[i], NULL);
     }
-
-    for (uint32_t i = 0; i < sz; ++i) {
-        fputs(fs[i]->buf, stdout);
-        free(fs[i]);
-    }
-
-    free(fs);
 }

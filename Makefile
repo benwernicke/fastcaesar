@@ -1,6 +1,7 @@
 CC := gcc
-DEBUG_FLAGS    := -Wall -pedantic -g -fsanitize=leak -fsanitize=undefined -fsanitize=address -lpthread -DBUF_SIZE=8192 -msse4.2
-RELEASE_FLAGS  := -march=native -mtune=native -O3 -flto -lpthread -DBUF_SIZE=8192 -msse4.2
+GENERAL_FLAGS := -DBUF_SIZE=1024 -mavx2 -lpthread
+DEBUG_FLAGS    := ${GENERAL_FLAGS} -Wall -pedantic -g -fsanitize=leak -fsanitize=undefined -fsanitize=address
+RELEASE_FLAGS  := ${GENERAL_FLAGS} -march=native -mtune=native -O3 -flto
 
 a.out := main.o a.o
 b.out := main.o b.o
@@ -11,10 +12,11 @@ f.out := main.o f.o
 g.out := main.o g.o
 h.out := main.o h.o
 i.out := main.o i.o
+j.out := main.o j.o
 
 SRC := $(wildcard *.c)
 OBJ := ${SRC:c=o}
-TARGETS := a.out b.out c.out d.out e.out f.out g.out h.out i.out
+TARGETS := a.out b.out c.out d.out e.out f.out g.out h.out i.out j.out
 
 .PHONY: clean all release debug bench
 
@@ -23,7 +25,20 @@ all: debug
 bench: release
 	hyperfine --warmup 10 -N './a.out lorem 22' './b.out lorem 22' './c.out lorem 22' \
 		'./d.out lorem 22' './e.out lorem 22' './f.out lorem 22' './g.out lorem 22' \
-		'./h.out lorem 22' './i.out lorem 22'
+		'./h.out lorem 22' './i.out lorem 22' './j.out lorem 22'
+
+bench2: release
+	hyperfine --warmup 10 -N \
+		'./pipe.sh a.out' \
+		'./pipe.sh b.out' \
+		'./pipe.sh c.out' \
+		'./pipe.sh d.out' \
+		'./pipe.sh e.out' \
+		'./pipe.sh f.out' \
+		'./pipe.sh g.out' \
+		'./pipe.sh h.out' \
+		'./pipe.sh i.out' \
+		'./pipe.sh j.out'
 
 clean:
 	rm -f *.out *.o *.log
